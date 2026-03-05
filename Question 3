@@ -17,7 +17,7 @@
 0017: void reset (bool s) ;
 0018:
 0019: public:
-0020: AlertLED (int gpio,unsigned period_ms=1000); 
+0020: AlertLED (int gpio,unsigned period_ms=500); 
 0021: void alert();
 0022: void cancel ();
 0023:
