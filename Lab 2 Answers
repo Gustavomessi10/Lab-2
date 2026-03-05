@@ -9,18 +9,152 @@
 
 ** Question 1:
 
-
+For the producers, in listing 3-1 theres is only one instance of "debounce_task" created in "setup()". In listing 3-2 there
+are two instances of "debounce_task". One for the left button "debounceL" and one for the right button "debouncer". Both 
+tasks send data to the same shared queue. For the consumers, in the listing 3-1 only one instance of "led-task". In listing
+3-2, there is a single "press-task" that processes messages from both button tasks to determine the LED state. Both datas
+differ. In listing 3-1 the consumer toggles an LED based on whether the event is true. In listing 3-2 the consumer uses the
+integer to perform bitwise operations, tracking the state of multiple specific buttons.
 
 ** Question 2:
 
-
+In the original listing 3-2, the queue has a large capacity. If the consumer task ("press_task") ever fails to keep up with
+the producer tasks, the queue could fill up. Listing 3-3 addresses this by ensuring that if a "button release" event cannot
+be queued, the system forces a "fail-safe" state. It prioritizes clearing the system state over processing old button 
+presses, ensuring the "press" (LED) deactivates immediately if the software loses track of button states. The changes made 
+to implement this were the queue size, a new constant, producer logic (debounce_task), and consumer logic (press_task).
 
 ** Question 3:
 
-
+0001: // alertled.ino
+0002: // MIT License (see fi l e LICENSE) 
+0003:
+0004: // LED is active high
+0005: #define GPIO_LED 12
+0006: 
+0007: //
+0008: // AlertLED class to drive LED 
+0009: //
+0010: class AlertLED f
+0011: TimerHandle_t thandle = nullptr; 
+0012: volatile bool     state;
+0013: volatile unsigned count;
+0014: unsigned          period_ms; 
+0015: int               gpio;
+0016:
+0017: void reset (bool s) ;
+0018:
+0019: public:
+0020: AlertLED (int gpio,unsigned period_ms=500); 
+0021: void alert();
+0022: void cancel ();
+0023:
+0024: static void callback (TimerHandle_t th);
+0025: };
+0026:
+0027: //
+0028: // Constructor:
+0029: // gpio        GPIO pin to drive LED on
+0030: // period_ms   Overall period in ms
+0031: //
+0032: AlertLED: :AlertLED ( i n t gpio,unsigned period_ms) { 
+0033: this->gpio = gpio;
+0034: this-›period ms = period ms;
+0035: pinMode (this->gpio, OUTPUT);
+0036: digitalWrite (this-›gpio,Low);
+0037: }
+0038:
+0039: //
+0040: // Internal method to reset values 
+0041: //
+0042: void AlertLED: :reset (bool s) {
+0043: state = s;
+0044: count = 0;
+0045: digitalWrite(this->gpio, s?HIGH: LOW); 
+0046: }
+0047:
+0048: //
+0049: // Method to start the alert:
+0050: //
+0051: void AlertLED::alert() {
+0052: 
+0053: if ( !thandle ) {
+0054:   thandle = xTimerCreate(
+0055:     "alert_tmr",
+0056:     pdMS_TO_TICKS (period_ms/20),
+0057:     pdTRUE,
+0058:     this,
+0059:     AlertLED: :callback);
+0060:   assert (thandle);
+0061: }
+0062: reset (true);
+0063: xTimerstart(thandle,portMAX_DELAY); 
+0064: }
+0065:
+0066: //
+0067: // Method to stop an alert:
+0068: //
+0069: void AlertLED:: cancel() {
+0070:   if(thandle) {
+0071:     xTimerStop (thandle,portMAX_DELAY); 
+0072:     digitalWrite (gpio, LOW);
+0073:   }
+0074: }
+0075:
+0076: // static method, acting as the 
+0077: // timer callback:
+0078: //
+0079: void AlertLED::callback (TimerHandle_t th) {
+0080:   AlertLED *obi = (AlertLED*)pvTimerGetTimerID (th): 
+0081:
+0082:   assert (obj-›thandle == th) ;
+0083:   obj-›state =^ true;
+0084:   digitalWrite(obj->gpio,obj->state?HIGH:LOW);
+0085:
+0086:   if ( ++obi-›count => 5 * 2 ) {
+0087:     obj-›reset(true);
+0088:     xTimerChangePeriod(th,pdMS_TO_TICKS(obj-›period_ms/20),portMAX_
+DELAY);
+0089:   } else if (obi->count == 5 * 2 - 1 ) {
+0090:     xTimerChangePeriod(th,
+0091:       pdMS_TO_TICKS (obj-›period_ms/20+obj-›period_ms/2),
+0092:       portMAX_DELAY);
+0093:     assert(lobj-›state);
+0094:   } 
+0095: } 
+0096:
+0097: //
+0098: // Global objects
+0099: //
+0100: static AlertLED alert1 (GPIO_LED, 1000);
+0101: static unsigned loop_count = 0;
+0102:
+0103: //
+0104: // Initialization:
+0105: //
+0106: void setup() {
+0107:   // delay (2000); // Allow USB to connect 
+0108:   alerti.alert;
+0109: }
+0110:
+0111: void loop() {
+0112:   if ( loop_count => 70 ) {
+0113:     alerti.alert();
+0114:     loop_count = 0;
+0115:   }
+0116:
+0117:   delay (100);
+0118:
+0119:   if ( ++loop_count >= 50 )
+0120:     alerti.cancel ();
+0121: }
 
 ** Question 4:
 
 Submit image to the separate Canvas submission link
 
 ** Question 5:
+Both GPIO_LED1 and GPIO_LED2 are intitialized to HIGH in the setup() function before the tasks are started. Once the tasks begin execution,
+GPIO_LED1 and GPIO_LED2 will attempt to blink nearly simultaneously because both tasks are created with the same priority (1) and pinned 
+to the same CPU core. The "delay" in this program refers to the timing drift or interval between blinks, which occurs for different reasons
+in each task such as a cummulative delay in Task1, a precise interval in Task2, and artificial processing delay.
