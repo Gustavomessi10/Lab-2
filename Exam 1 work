@@ -1,1 +1,70 @@
+#include "FreeRTOS.h"
+#include "task.h"
+#include "queue.h"
+#include "timers.h"
 
+extern int  ReadButtonState(void);
+extern void SetLED(int state);
+
+// Constants
+#define QUEUE_LENGTH    5
+#define ITEM_SIZE       sizeof(int)
+#define TIMER_PERIOD_MS pdMS_TO_TICKS(1000)
+
+// Handles
+QueueHandle_t xButtonQueue = NULL;
+TimerHandle_t xPollTimer = NULL;
+
+/* --- Timer Callback Function --- 
+ */
+void vButtonTimerCallback(TimerHandle_t xTimer) {
+    int buttonStatus = ReadButtonState();
+    
+    // Send status to queue. xTicksToWait is 0 because we 
+    // shouldn't block inside a timer callback.
+    xQueueSend(xButtonQueue, &buttonStatus, 0);
+}
+
+/* --- LED Control Task --- 
+ */
+void vLEDTask(void *pvParameters) {
+    int receivedStatus;
+
+    for (;;) {
+        // Block indefinitely (portMAX_DELAY) until a message arrives
+        if (xQueueReceive(xButtonQueue, &receivedStatus, portMAX_DELAY) == pdPASS) {
+            if (receivedStatus == 1) { // Assuming 1 = Pressed
+                SetLED(1);
+            } else {
+                SetLED(0);
+            }
+        }
+    }
+}
+
+int main(void) {
+    // 1. Create the Queue (the "Mailbox")
+    xButtonQueue = xQueueCreate(QUEUE_LENGTH, ITEM_SIZE);
+
+    if (xButtonQueue != NULL) {
+        // 2. Create the LED Task
+        xTaskCreate(vLEDTask, "LED_Task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+
+        // 3. Create the Auto-reload Timer
+        xPollTimer = xTimerCreate("BtnTimer",       // Name
+                                  TIMER_PERIOD_MS, // 1 second period
+                                  pdTRUE,          // Auto-reload
+                                  (void *)0,       // Timer ID
+                                  vButtonTimerCallback);
+
+        // 4. Start the Timer and Scheduler
+        if (xPollTimer != NULL) {
+            xTimerStart(xPollTimer, 0);
+        }
+        
+        vTaskStartScheduler();
+    }
+
+    for (;;); // Should never reach here
+    return 0;
+}
