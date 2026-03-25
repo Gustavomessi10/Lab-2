@@ -1,70 +1,71 @@
-#include "FreeRTOS.h"
-#include "task.h"
-#include "queue.h"
-#include "timers.h"
+#include <stdio.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h"
+#include "freertos/timers.h"
+#include "driver/gpio.h"
 
-extern int  ReadButtonState(void);
-extern void SetLED(int state);
+// Define GPIO Pins
+#define BUTTON_GPIO    GPIO_NUM_0   // Often the "BOOT" button on ESP32 dev boards
+#define LED_GPIO       GPIO_NUM_2   // Often the onboard Blue LED
 
 // Constants
-#define QUEUE_LENGTH    5
-#define ITEM_SIZE       sizeof(int)
+#define QUEUE_LENGTH    5
 #define TIMER_PERIOD_MS pdMS_TO_TICKS(1000)
 
 // Handles
 QueueHandle_t xButtonQueue = NULL;
 TimerHandle_t xPollTimer = NULL;
 
-/* --- Timer Callback Function --- 
- */
+/* --- Timer Callback --- */
 void vButtonTimerCallback(TimerHandle_t xTimer) {
-    int buttonStatus = ReadButtonState();
-    
-    // Send status to queue. xTicksToWait is 0 because we 
-    // shouldn't block inside a timer callback.
-    xQueueSend(xButtonQueue, &buttonStatus, 0);
+    int buttonStatus = gpio_get_level(BUTTON_GPIO);
+    
+    // Send status to queue (0 for pressed, 1 for released)
+    xQueueSend(xButtonQueue, &buttonStatus, 0);
 }
 
-/* --- LED Control Task --- 
- */
+/* --- LED Task --- */
 void vLEDTask(void *pvParameters) {
-    int receivedStatus;
-
-    for (;;) {
-        // Block indefinitely (portMAX_DELAY) until a message arrives
-        if (xQueueReceive(xButtonQueue, &receivedStatus, portMAX_DELAY) == pdPASS) {
-            if (receivedStatus == 1) { // Assuming 1 = Pressed
-                SetLED(1);
-            } else {
-                SetLED(0);
-            }
-        }
-    }
+    int receivedStatus;
+    for (;;) {
+        // Task blocks here until the timer sends data
+        if (xQueueReceive(xButtonQueue, &receivedStatus, portMAX_DELAY) == pdPASS) {
+            // If button is pressed (0), turn LED ON (1)
+            if (receivedStatus == 0) {
+                gpio_set_level(LED_GPIO, 1);
+            } else {
+                gpio_set_level(LED_GPIO, 0);
+            }
+        }
+    }
 }
 
-int main(void) {
-    // 1. Create the Queue (the "Mailbox")
-    xButtonQueue = xQueueCreate(QUEUE_LENGTH, ITEM_SIZE);
+void app_main(void) {
+    // 1. Configure GPIOs
+    gpio_reset_pin(LED_GPIO);
+    gpio_set_direction(LED_GPIO, GPIO_MODE_OUTPUT);
+    
+    gpio_reset_pin(BUTTON_GPIO);
+    gpio_set_direction(BUTTON_GPIO, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(BUTTON_GPIO, GPIO_PULLUP_ONLY); // Enable internal pull-up
 
-    if (xButtonQueue != NULL) {
-        // 2. Create the LED Task
-        xTaskCreate(vLEDTask, "LED_Task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+    // 2. Create the Queue
+    xButtonQueue = xQueueCreate(QUEUE_LENGTH, sizeof(int));
 
-        // 3. Create the Auto-reload Timer
-        xPollTimer = xTimerCreate("BtnTimer",       // Name
-                                  TIMER_PERIOD_MS, // 1 second period
-                                  pdTRUE,          // Auto-reload
-                                  (void *)0,       // Timer ID
-                                  vButtonTimerCallback);
+    if (xButtonQueue != NULL) {
+        // 3. Create the LED Task
+        xTaskCreate(vLEDTask, "LED_Task", 2048, NULL, 1, NULL);
 
-        // 4. Start the Timer and Scheduler
-        if (xPollTimer != NULL) {
-            xTimerStart(xPollTimer, 0);
-        }
-        
-        vTaskStartScheduler();
-    }
+        // 4. Create the Auto-reload Timer
+        xPollTimer = xTimerCreate("BtnTimer", 
+                                  TIMER_PERIOD_MS, 
+                                  pdTRUE, 
+                                  (void *)0, 
+                                  vButtonTimerCallback);
 
-    for (;;); // Should never reach here
-    return 0;
+        if (xPollTimer != NULL) {
+            xTimerStart(xPollTimer, 0);
+        }
+    }
 }
